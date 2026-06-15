@@ -3,6 +3,7 @@ from enum import Enum
 import socket
 import struct
 from typing import Any, Dict, List, Tuple
+import uuid
 
 from datatypes import VarNum
 from errors import BadPacketError, LegacyPing
@@ -51,13 +52,29 @@ class PacketID(Enum):
     """Invalid packet ID"""
 
     # Handshaking
-    CLIENT_INTENTION = 0x00
+    CLIENT_INTENTION = 0x0
 
     # Status
-    CLIENT_STATUS_REQUEST = 0x00
-    SERVER_STATUS_RESPONSE = 0x00
-    CLIENT_PING_REQUEST = 0x01
-    SERVER_PONG_RESPONSE = 0x01
+    CLIENT_STATUS_REQUEST = 0x0
+    SERVER_STATUS_RESPONSE = 0x0
+    CLIENT_PING_REQUEST = 0x1
+    SERVER_PONG_RESPONSE = 0x1
+
+    # Login
+    # TODO: Maaaybe implement encryption/Mojang auth?
+    # TODO: Implement compression?
+    # TODO: Implement plugin queries and cookies?
+    CLIENT_HELLO = 0x0
+    CLIENT_KEY = 0x1
+    CLIENT_CUSTOM_QUERY_ANSWER = 0x2
+    CLIENT_LOGIN_ACKNOWLEDGED = 0x3
+    CLIENT_COOKIE_RESPONSE = 0x4
+    SERVER_LOGIN_DISCONNECT = 0x0
+    SERVER_HELLO = 0x1
+    SERVER_LOGIN_FINISHED = 0x2
+    SERVER_LOGIN_COMPRESSION = 0x3
+    SERVER_CUSTOM_QUERY = 0x4
+    SERVER_COOKIE_REQUEST = 0x5
 
 
 class PacketFieldType(Enum):
@@ -114,6 +131,9 @@ class PacketFieldType(Enum):
 
     VARLONG = 15
     """Variable-size 64-bit signed int"""
+
+    UUID = 16
+    """A UUID. Encoded as a 128-bit integer (most significant 64, least significant 64)"""
 
     # TODO: Add all of the other types
 
@@ -332,6 +352,16 @@ class PacketField:
                 self.value = result
 
                 return result_size
+            case PacketFieldType.UUID:
+                if len(data) < 16:
+                    raise EOFError(
+                        f"Expected at least 16 bytes for {self.type.name} field (got {len(data)} bytes instead)"
+                    )
+
+                # TODO: Check if this is big endian
+                self.value = uuid.UUID(bytes=data[0:16])
+
+                return 16
             case _:
                 raise TypeError(
                     f"No decoder implemented for field type {self.type.name}"
@@ -366,9 +396,12 @@ class PacketField:
                 # TODO: IMPORTANT! Check that string fits in size limit
             case PacketFieldType.LONG:
                 result += struct.pack("!q", self.value)
+            case PacketFieldType.UUID:
+                # TODO: Check if this is big endian
+                result += self.value.bytes
             case _:
                 raise TypeError(
-                    f"Can't encode field of type {self.type.name} (unimplemented)"
+                    f"No encoder implemented for field type {self.type.name}"
                 )
 
         return result
@@ -390,7 +423,16 @@ class Packet:
         **Packet must be an ingoing pakcet or have been encoded with Packet().encode_fields()
     """
 
-    _PACKET_FIELDS: Dict[
+    """This massive dict is used to define packet fields for different packet IDs.
+
+    If a packet ID doesn't have an entry here, the packet is considered unrecognized.
+
+    See also server.py/Snake3Server.PACKET_HANDLERS
+
+    The structure of the dict is as follows:
+        PACKET_FIELDS[<protocol state of client>]["serverbound"/"clientbound"][<packet ID>][<name of field>]
+    """
+    PACKET_FIELDS: Dict[
         ProtocolState, Dict[str, Dict[PacketID, Dict[str, PacketField]]]
     ] = {
         ProtocolState.HANDSHAKE: {
@@ -416,6 +458,63 @@ class Packet:
                 },
                 PacketID.SERVER_PONG_RESPONSE: {
                     "payload": PacketField(PacketFieldType.LONG)
+                },
+            },
+        },
+        ProtocolState.LOGIN: {
+            "serverbound": {
+                PacketID.CLIENT_HELLO: {
+                    "player_name": PacketField(PacketFieldType.STRING, None, 16),
+                    "player_uuid": PacketField(PacketFieldType.UUID),
+                },
+                PacketID.CLIENT_KEY: {
+                    # TODO: Implement
+                    # This requires Prefixed Array support
+                    "_": PacketField(PacketFieldType.NULL)
+                },
+                PacketID.CLIENT_CUSTOM_QUERY_ANSWER: {
+                    # TODO: Implement
+                    # This requires Prefixed Optional support
+                    "_": PacketField(PacketFieldType.NULL)
+                },
+                PacketID.CLIENT_LOGIN_ACKNOWLEDGED: {},
+                PacketID.CLIENT_COOKIE_RESPONSE: {
+                    # TODO: Implement
+                    # This requires Prefixed Optional *and* Prefixed Array support
+                    "_": PacketField(PacketFieldType.NULL)
+                },
+            },
+            "clientbound": {
+                PacketID.SERVER_LOGIN_DISCONNECT: {
+                    # TODO: This should use a JSON_TEXT_COMPONENT field, however, this can't
+                    # be done until a text component API is implemented.
+                    # "reason": PacketField(PacketFieldType.JSON_TEXT_COMPONENT)
+                    "reason": PacketField(PacketFieldType.STRING, None, 32767)
+                },
+                PacketID.SERVER_HELLO: {
+                    # TODO: Implement
+                    # This requires Prefixed Array support
+                    "server_id": PacketField(PacketFieldType.STRING, None, 20),
+                    "public_key": PacketField(PacketFieldType.NULL),
+                    "verify_token": PacketField(PacketFieldType.NULL),
+                    "should_authenticate": PacketField(PacketFieldType.BOOL),
+                },
+                PacketID.SERVER_LOGIN_FINISHED: {
+                    # TODO: Implement
+                    # This requires Game Profile support which requires support for
+                    # Prefixed Optional and Prefixed Array
+                    "_": PacketField(PacketFieldType.NULL)
+                },
+                PacketID.SERVER_LOGIN_COMPRESSION: {
+                    "threshold": PacketField(PacketFieldType.VARINT)
+                },
+                PacketID.SERVER_CUSTOM_QUERY: {
+                    "message_id": PacketField(PacketFieldType.VARINT),
+                    "channel": PacketField(PacketFieldType.IDENTIFIER),
+                    # TODO: Somehow implement data
+                },
+                PacketID.SERVER_COOKIE_REQUEST: {
+                    "key": PacketField(PacketFieldType.IDENTIFIER)
                 },
             },
         },
@@ -567,7 +666,7 @@ class Packet:
         packet = Packet(client, True)
         packet.packet_id = packet_id
 
-        template = Packet._PACKET_FIELDS[client.state]["clientbound"][packet_id]
+        template = Packet.PACKET_FIELDS[client.state]["clientbound"][packet_id]
         if list(template.keys()) != list(fields.keys()):
             raise ValueError("Provided fields don't match packet template")
 
@@ -592,7 +691,7 @@ class Packet:
 
         # Acquire the correct template for the packet ID
         try:
-            template = Packet._PACKET_FIELDS[self.client.state]["serverbound"][
+            template = Packet.PACKET_FIELDS[self.client.state]["serverbound"][
                 self.packet_id
             ]
         except KeyError:
@@ -676,15 +775,17 @@ class SocketConnection:
     """Represents an active socket connection to a client.
 
     Attributes:
-        sock (socket.socket): The client socket
-        addr (Tuple): The client address ([0]) and port ([1])
-        state (ProtocolState): Current protocol state
+        sock: The client socket
+        addr: The client address ([0]) and port ([1])
+        state: Current protocol state
+        closed: Whether the connection was closed via SocketConnection().close()
     """
 
     def __init__(self, sock: socket.socket, addr: Tuple) -> None:
         self.sock: socket.socket = sock
         self.addr: Tuple = addr
         self.state: ProtocolState = ProtocolState.HANDSHAKE
+        self.closed: bool = False
 
     def close(self):
         """Closes the SocketConnection().
@@ -693,9 +794,16 @@ class SocketConnection:
         can be sent or recieved after this call. This should only be called
         after an error in the connection (e.g. a bad packet) or after the
         client is ready to gracefully disconnect.
+
+        Raises:
+            ValueError - Already closed
         """
 
-        self.sock.close()
+        if not self.closed:
+            self.closed = True
+            self.sock.close()
+        else:
+            raise ValueError("Connection already closed")
 
     def send_packet(self, packet: Packet) -> None:
         """Sends a packet to the client through the SocketConnection().

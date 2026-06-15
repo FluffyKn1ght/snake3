@@ -62,12 +62,21 @@ class Snake3Server:
                 packets = self.socket_handler.accept_and_recieve()
 
                 for packet in packets:
+                    if packet.client.closed:
+                        continue
+
                     try:
                         packet.decode_fields()
                     except BadPacketError as e:
-                        self.logger.error(
-                            f"Unable to decode packet from {packet.client.addr[0]}:{packet.client.addr[1]}: {e}"
-                        )
+                        if packet.client.state != ProtocolState.HANDSHAKE:
+                            self.logger.error(
+                                f"Unable to decode packet from {packet.client.addr[0]}:{packet.client.addr[1]}: {e}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"(ignoring) Unable to decode packet from {packet.client.addr[0]}:{packet.client.addr[1]}: {e}"
+                            )
+                        self.socket_handler.disconnect(packet.client)
                         continue
 
                     self.logger.debug(f"Got packet: {packet}")
@@ -112,7 +121,20 @@ class Snake3Server:
             (other Exception()s) - Error while handling packet
         """
 
-        _PACKET_HANDLERS: Dict[
+        """This massive dict is used to define handlers for different packets.
+
+        A packet handler is a Callable that takes a Snake3Server() (self) and the Packet() to
+        handle, returning None.
+
+        If a packet doesn't have an entry here, it's considered unimplemented.
+
+        See also network.py/Packet.PACKET_FIELDS
+
+        The structure of the dict is as follows:
+            PACKET_HANDLERS[<protocol state of client>][<packet ID>]
+        """
+
+        PACKET_HANDLERS: Dict[
             ProtocolState, Dict[PacketID, Callable[[Snake3Server, Packet], None]]
         ] = {
             ProtocolState.HANDSHAKE: {
@@ -122,10 +144,13 @@ class Snake3Server:
                 PacketID.CLIENT_STATUS_REQUEST: Snake3Server._handle_packet_status_request,
                 PacketID.CLIENT_PING_REQUEST: Snake3Server._handle_packet_ping_request,
             },
+            ProtocolState.LOGIN: {
+                PacketID.CLIENT_HELLO: Snake3Server._handle_packet_hello
+            },
         }
 
         try:
-            _PACKET_HANDLERS[packet.client.state][packet.packet_id](self, packet)
+            PACKET_HANDLERS[packet.client.state][packet.packet_id](self, packet)
         except KeyError:
             raise BadPacketError(
                 f"No handler for packet ID {hex(packet.packet_id.value)} for state {packet.client.state.name}"
@@ -208,4 +233,14 @@ class Snake3Server:
         packet.respond(
             PacketID.SERVER_PONG_RESPONSE,
             payload=packet.fields["payload"].value,
+        )
+
+    def _handle_packet_hello(self, packet: Packet) -> None:
+        self.logger.info(
+            f"[{packet.client.addr[0]}:{packet.client.addr[1]}] wants to log in as {packet.fields["player_name"].value} ({packet.fields["player_uuid"].value})"
+        )
+
+        packet.respond(
+            PacketID.SERVER_LOGIN_DISCONNECT,
+            reason='{"text":"g","color":"#00FFFF","bold":true,"italic":true}',
         )
