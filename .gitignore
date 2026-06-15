@@ -1,3 +1,4 @@
 **/__pycache__/**
 *.log
 icon.png
+config.json

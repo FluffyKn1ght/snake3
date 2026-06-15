@@ -5,6 +5,7 @@ import time
 import traceback
 from typing import Any, Callable, Dict
 
+from config import Snake3Config
 from errors import BadPacketError
 from logger import BaseLogger, FileLogger, ForwardLogger, LogLevel, PrintLogger
 from network import Packet, PacketID, ProtocolState, SocketHandler
@@ -14,12 +15,14 @@ class Snake3Server:
     PROTOCOL_VERSION: int = 775
     """The Minecraft Java protocol version the server speaks."""
 
-    def __init__(self) -> None:
-        # TODO: Config and flags
+    def __init__(self, *args, config: Snake3Config) -> None:
+        self.config: Snake3Config = config
 
         self.socket_handler: SocketHandler
 
         self.icon_base64: str = ""
+
+        # TODO: Handle loglevel config field
 
         self.main_logger: BaseLogger
         try:
@@ -37,7 +40,7 @@ class Snake3Server:
 
         self._running: bool = False
 
-    def run(self) -> None:
+    def run(self) -> None:  # TODO: Handle loglevel config field
         self._running = True
 
         self.logger.warn("Starting snake3 server...")
@@ -57,15 +60,17 @@ class Snake3Server:
                 ForwardLogger(
                     self.main_logger.level, self.main_logger, "SocketHandler"
                 ),
-                "0.0.0.0",
-                25565,
-                max_recv_size=2**32 - 1,
+                self.config.listen_address,
+                self.config.listen_port,
+                max_recv_size=self.config.max_recv_size,
             )
         except OSError as e:
             self.logger.error(f"Failed to initialize SocketHandler: {e}")
             self.stop()
 
-        self.logger.info("Listening on 0.0.0.0:25565")
+        self.logger.info(
+            f"Listening on {self.config.listen_address}:{self.config.listen_port}"
+        )
 
         # TODO: Actual console stuff with async command input
         # TODO: Maybe put the SocketHandler onto a different thread?
@@ -182,58 +187,49 @@ class Snake3Server:
         )
 
     def _handle_packet_status_request(self, packet: Packet) -> None:
+        reported_protocol_ver: int = (
+            Snake3Server.PROTOCOL_VERSION
+            if self.config.hide_online_count != 2
+            else 42069
+        )
+
+        description: str | Dict[str, Any] = "A Snake3 Server"
+        try:
+            description = json.loads(self.config.message_of_the_day)
+        except json.JSONDecodeError as e:
+            self.logger.debug(f"JSONDecodeError while trying to decode MOTD: {e}")
+            description = self.config.message_of_the_day
+
         status_info: Dict[str, Any] = {
             "version": {
-                "name": "yipyipyip :3 *tailwag*",
-                "protocol": Snake3Server.PROTOCOL_VERSION,
+                "name": self.config.version_string,
+                "protocol": reported_protocol_ver,
             },
-            "players": {
-                "max": 78,
-                "online": 26,
-                "sample": [
-                    {
-                        "name": "hiohio                  hiohio",
-                        "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20",
-                    },
-                    {
-                        "name": "      hio            hio",
-                        "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20",
-                    },
-                    {
-                        "name": "       hio         hiohiohio",
-                        "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20",
-                    },
-                    {
-                        "name": "   hio             hio          hio",
-                        "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20",
-                    },
-                    {
-                        "name": "hio                 hio        hio",
-                        "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20",
-                    },
-                    {
-                        "name": "hiohiohio               hiohio",
-                        "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20",
-                    },
-                ],
-            },
-            "description": [
-                {
-                    "text": "yipyipyipyipyipyipyip :3",
-                    "color": "gold",
-                    "bold": True,
-                },
-                {
-                    "text": "\n(this is all a python script btw-)",
-                    "color": "gray",
-                    "bold": False,
-                },
-            ],
+            "description": description,
             "enforcesSecureChat": False,
         }
 
         if self.icon_base64:
             status_info["favicon"] = f"data:image/png;base64,{self.icon_base64}"
+
+        match self.config.hide_online_count:
+            case 1:
+                # hide online count by not sending player count info
+                # *staples "that was easy" button*
+                pass
+            case 2:
+                # hide online count by sending bogus protocol version
+                status_info["version"]["protocol"] = 42069
+            case _:
+                # don't hide online count
+                # this is default behavior, incl. for a value of 0
+                # TODO: Implement
+                status_info["players"] = {
+                    "max": (
+                        self.config.max_players if self.config.max_players else 999999
+                    ),
+                    "online": -1,
+                }
 
         status_json = json.dumps(status_info)
 
