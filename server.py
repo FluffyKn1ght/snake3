@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime
 import json
 import time
@@ -17,6 +18,8 @@ class Snake3Server:
         # TODO: Config and flags
 
         self.socket_handler: SocketHandler
+
+        self.icon_base64: str = ""
 
         self.main_logger: BaseLogger
         try:
@@ -38,6 +41,16 @@ class Snake3Server:
         self._running = True
 
         self.logger.warn("Starting snake3 server...")
+
+        try:
+            with open("icon.png", "rb") as f:
+                icon_data = f.read()
+                self.icon_base64 = base64.b64encode(icon_data).decode("utf-8")
+            self.logger.debug("Loaded and base64-encoded icon.png")
+        except FileNotFoundError:
+            self.logger.debug(
+                "icon.png not found, server will not send icon during server list ping"
+            )
 
         try:
             self.socket_handler = SocketHandler(
@@ -218,6 +231,9 @@ class Snake3Server:
             ],
             "enforcesSecureChat": False,
         }
+
+        if self.icon_base64:
+            status_info["favicon"] = f"data:image/png;base64,{self.icon_base64}"
 
         status_json = json.dumps(status_info)
 
