@@ -510,28 +510,28 @@ class Packet:
 
     Attributes:
         name: The official packet name as per MC datagen output.
-            This is "#unknown#" by default, unless set by Packet().decode_fields() or an external function.
+            This is "#unknown#" by default, unless set by Packet().decode() or an external function.
         state: The ProtocolState the packet was recieved in.
-            This is ProtocolState.UNKNOWN by default, unless set by Packet().decode_fields() or an external
+            This is ProtocolState.UNKNOWN by default, unless set by Packet().decode() or an external
             function.
         clientbound: Whether the packet is clientbound (True) or serverbound (False).
-            This is None by default, unless set by Packet().decode_fields() or an external function.
+            This is None by default, unless set by Packet().decode() or an external function.
         fields: The Python-accesible representation of packet data.
-            This is None by default, unless populated by an external function or Packet().decode_fields().
+            This is None by default, unless populated by an external function or Packet().decode().
         length: The length of the packet *as per protocol spec* (packet ID + data).
             This is -1 by default, unless the packet was made using Packet.create_from_data() or was
-            encoded with Packet().encode_fields().
+            encoded with Packet().encode().
         id: The packet ID integer. THIS DOES NOT TELL YOU WHAT THE PACKET IS, use Packet().name,
             Packet().state and Packet().clientbound instead.
             This is -1 by default, unless the packet was made using Packet.create_from_data() or was
-            encoded with Packet().encode_fields().
+            encoded with Packet().encode().
         data: The unparsed data of the packet.
             This is always uncompressed, even if created from/encoded to compressed data.
             This in empty unless the packet was created using Packet.create_from_data() or was encoded for
-            sending using Packet().encode_fields().
+            sending using Packet().encode().
         raw: The raw packet representation used on-the-wire.
             This in empty unless the packet was created using Packet.create_from_data() or was encoded for
-            sending using Packet().encode_fields().
+            sending using Packet().encode().
             Note that this can sometimes be compressed and not plainly readable.
     """
 
@@ -587,7 +587,7 @@ class Packet:
 
         Args:
             data: The data to create the packet from
-            bool: Whether the packet is expected to be in the compressed format or not
+            compressed: Whether the packet is expected to be in the compressed format or not
 
         Returns:
             The created Packet()
@@ -616,7 +616,7 @@ class Packet:
 
         return packet
 
-    def decode_fields(self, state: ProtocolState, clientbound: bool) -> None:
+    def decode(self, state: ProtocolState, clientbound: bool) -> None:
         """Determines and decodes the data fields of the packet.
 
         This function requires you to provide additional context about the packet - the
@@ -639,6 +639,7 @@ class Packet:
         """
 
         self.clientbound = clientbound
+        self.state = state
 
         try:
             packet_names: Dict[str, Dict[str, int]] = Packet.PACKET_IDS[state.value][
@@ -671,3 +672,40 @@ class Packet:
             offset += field.fill_in(self.data[offset:])
 
             self.fields[field_name] = field
+
+    def encode(self, compressed: bool) -> None:
+        """Encodes the packet and its fields into data that can be sent over-the-wire.
+
+        The sendable data is stored in the Packet().raw property.
+
+        This function is NOT ATOMIC, and the Packet() should be discarded/re-encoded if an
+        exception is raised.
+
+        Args:
+            compressed: Whether to compress the packet when encoding
+
+        Raises:
+            ValueError - Something went wrong while encoding the packet/one of the fields
+        """
+
+        if compressed:
+            raise ValueError("Compression support isn't implemented yet")
+        else:
+            try:
+                self.id = Packet.PACKET_IDS[self.state.value][
+                    "clientbound" if self.clientbound else "serverbound"
+                ][self.name]["protocol_id"]
+            except KeyError:
+                raise ValueError(
+                    f"No numerical packet ID found for {"clientbound" if self.clientbound else "serverbound"} packet {self.name} state {self.state.value}"
+                )
+
+            if self.fields:
+                for field_name in self.fields:
+                    self.data += self.fields[field_name].encode()
+
+            encoded_packet_id = VarNum.encode(self.id, False)
+            encoded_length = VarNum.encode(
+                len(self.data) + len(encoded_packet_id), False
+            )
+            self.raw = encoded_length + encoded_packet_id + self.data

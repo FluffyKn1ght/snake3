@@ -83,7 +83,7 @@ class Snake3Server:
                 for client in packets:
                     for packet in packets[client]:
                         try:
-                            packet.decode_fields(client.state, False)
+                            packet.decode(client.state, False)
                         except (ValueError, TypeError) as e:
                             if client.state != ProtocolState.HANDSHAKE:
                                 self.logger.error(
