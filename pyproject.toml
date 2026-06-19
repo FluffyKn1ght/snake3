@@ -1,0 +1,16 @@
+[project]
+name = "snake3"
+version = "1.21.10a"
+authors = [
+    {name = "FluffyKn1ght", email = "lightcraftzofficial@gmail.com"}
+]
+description = "A Minecraft Java multiplayer server written in Python!"
+requires-python = ">=3.14"
+dependencies = ["colorama>=0.4.6"]
+
+[project.scripts]
+snake3-server = "snake3.server.start:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["snake3*"]

@@ -1,9 +1,7 @@
 from typing import Tuple
 
-from misc import Uninstantiatable
 
-
-class VarNum(Uninstantiatable):
+class VarNum:
     """Utility class that handles encoding/decoding VarInt/VarLong values"""
 
     @staticmethod

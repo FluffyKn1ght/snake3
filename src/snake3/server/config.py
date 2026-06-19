@@ -2,10 +2,14 @@ import json
 from json.decoder import JSONDecodeError
 from typing import Any, Dict, Callable
 
-from errors import BadConfigError
+
+class BadConfigError(Exception):
+    """Gets raised whenever the server encounters an issue when loading a config file."""
+
+    pass
 
 
-class Snake3Config:
+class ServerConfig:
     """Represents a Snake3 server configuration file (config.json)
 
     Attributes:
@@ -22,13 +26,13 @@ class Snake3Config:
 
         # CONFIG FIELDS START BELOW
 
-        self._config_version_DONOTTOUCH: int = Snake3Config.LATEST_CONFIG_VERSION
+        self._config_version_DONOTTOUCH: int = ServerConfig.LATEST_CONFIG_VERSION
         """The config version number.
 
         This value is used only for migrating to newer config versions AND SHOULD NOT BE
         CHANGED BY THE USER to avoid breaking things.
 
-        Latest version number can be obtained from Snake3Config.LATEST_CONFIG_VERSION
+        Latest version number can be obtained from ServerConfig.LATEST_CONFIG_VERSION
         """
 
         self.listen_address: str = "0.0.0.0"
@@ -85,46 +89,27 @@ class Snake3Config:
         Setting this to 0 disables the feature.
         """
 
-        self.hide_online_count: int = 0
+        self.hide_online_count: bool = False
         """Whether and how to hide the online player count.
 
         Note that hiding the player count will also hide the player sample.
 
-        0 (and other values): Do not hide player count
-        1: Don't send player count (client will display ??? instead)
-        2: Don't send player count + send bogus protocol version (client will always display version_string instead)
-
-        Default: 0
+        Default: False
         """
 
-        self.version_string: str = "Snake3 Server for MC 26.1.2"
-        """The version string reported by the server.
-
-        This does NOT change the compatability/protocol/server behavior in any way, vanilla
-        clients use this as a purely cosmetic feature.
-
-        This does NOT support text components (legacy section sign formatting *is* supported though.)
-
-        Default: "Snake3 Server for MC 26.1.2"
-        """
-
-        self.message_of_the_day: str = (
-            r'[{"text":"A Snake3 Server","color":"gold","bold":true},{"text":" (v0.0.1)","color":"white","bold":false},{"text":"\nhttps://github.com/FluffyKn1ght/snake3","color":"gray","bold":false}]'
-        )
+        self.message_of_the_day: str = "A Snake3 Server"
         """The server description (also known as a message of the day or MOTD).
 
         This can be either a JSON string or a normal text string. If the value can be JSON-decoded,
         then the decoded JSON object will be sent as a JSON text component; otherwise, it will be sent
         over as-is as a simple text string.
 
-        Default (JSON-encoded, with formatting):
-            A Snake3 Server (v0.0.1)
-            https://github.com/FluffyKn1ght/snake3
+        Default: A Snake3 Server
         """
 
     @staticmethod
-    def load_from_file(fpath: str) -> Snake3Config:
-        """Loads a Snake3Config() from a .json file.
+    def load_from_file(fpath: str) -> ServerConfig:
+        """Loads a ServerConfig() from a .json file.
 
         The deserialized JSON object MUST follow the class structure - otherwise, errors will be
         encountered.
@@ -145,7 +130,7 @@ class Snake3Config:
             with open(fpath, "r") as fp:
                 config_file_data = json.load(fp)
         except FileNotFoundError:
-            config = Snake3Config()
+            config = ServerConfig()
             config._fpath = fpath
             config.save()
             return config
@@ -161,14 +146,14 @@ class Snake3Config:
 
             if (
                 config_file_data["_config_version_DONOTTOUCH"]
-                > Snake3Config.LATEST_CONFIG_VERSION
+                > ServerConfig.LATEST_CONFIG_VERSION
             ):
                 raise BadConfigError(
-                    f"Incompatible config version ({config_file_data["_config_version_DONOTTOUCH"]} > {Snake3Config.LATEST_CONFIG_VERSION})"
+                    f"Incompatible config version ({config_file_data["_config_version_DONOTTOUCH"]} > {ServerConfig.LATEST_CONFIG_VERSION})"
                 )
             elif (
                 config_file_data["_config_version_DONOTTOUCH"]
-                < Snake3Config.LATEST_CONFIG_VERSION
+                < ServerConfig.LATEST_CONFIG_VERSION
             ):
                 # TODO when newer config versions are needed: check if config can be migrated and
                 # attempt migration
@@ -178,7 +163,7 @@ class Snake3Config:
                 'Config doesn\'t have a version (no "_config_version_DONOTTOUCH" field)'
             )
 
-        config = Snake3Config()
+        config = ServerConfig()
 
         # Load fields
         try:
@@ -201,7 +186,7 @@ class Snake3Config:
         return config
 
     def save(self) -> None:
-        """Saves the Snake3Config() to its associated .JSON file.
+        """Saves the ServerConfig() to its associated .JSON file.
 
         Raises:
             OSError - Error when saving config file

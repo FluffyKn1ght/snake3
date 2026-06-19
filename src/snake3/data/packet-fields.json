@@ -1,0 +1,12 @@
+{
+    "handshake": {
+        "serverbound": {
+            "minecraft:intention": {
+                "protocol_version": {"type": "varint"},
+                "server_address": {"type": "string", "subtype": "plain", "max_length": 255},
+                "server_port": {"type": "ushort"},
+                "intent": {"type": "varint", "enum": [1, 2, 3]}
+            }
+        }
+    }
+}

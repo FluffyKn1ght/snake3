@@ -1,4 +1,9 @@
 **/__pycache__/**
-*.log
+
+src/snake3.egg-info/
+
+logs/
 icon.png
 config.json
+
+src/snake3/mcdata/
