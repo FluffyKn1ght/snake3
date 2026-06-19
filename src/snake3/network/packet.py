@@ -505,6 +505,12 @@ class PacketField:
                 raise ValueError(f"No encoder implemented for field type {self.type}")
 
 
+class LegacyPing(Exception):
+    """Gets raised whenever a legacy ping packet is attempted to be decoded. (0xFE 0x01 ...)"""
+
+    pass
+
+
 class Packet:
     """Represents a Minecraft Java protocol packet.
 
@@ -594,7 +600,11 @@ class Packet:
 
         Raises:
             ValueError - The provided packet has an invalid header or is otherwise corrupted/malformed
+            LegacyPing - Packet appears to be a legacy ping packet (starts with 0xFE 0xF1)
         """
+
+        if data[0:2] == b"\xfe\x01":
+            raise LegacyPing("Packet appears to be a legacy ping packet")
 
         packet: Packet = Packet()
 
