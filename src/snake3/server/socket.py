@@ -3,7 +3,7 @@ from enum import Enum
 import socket
 from typing import Dict, List, Tuple
 
-from snake3.network.packet import Packet, ProtocolState
+from snake3.network.packet import LegacyPing, Packet, ProtocolState
 from snake3.network.types import VarNum
 
 
@@ -11,15 +11,34 @@ class SocketConnection:
     """Represents an active socket connection to a client.
 
     Attributes:
-        sock: The client socket
+        sock: The underlying client socket
         addr: The client address ([0]) and port ([1])
         state: Current protocol state
+        closed: Whether the socket was closed via close() or disconnect()
     """
 
     def __init__(self, sock: socket.socket, addr: Tuple) -> None:
         self.sock: socket.socket = sock
         self.addr: Tuple = addr
         self.state: ProtocolState = ProtocolState.HANDSHAKE
+        self.closed: bool = False
+
+    def close(self) -> None:
+        """Closes the SocketConnection(), making it no longer usable.
+
+        This function IMMEDIATELY drops the connection, abruptly disconnecting the client
+        with an OS-specific "connection reset" error. It should be used only if the client
+        disconnected (to close the socket on the server side) or if it sent something invalid.
+
+        Raises:
+            ValueError - SocketConnection() was already closed
+        """
+
+        if self.closed:
+            raise ValueError("Already closed")
+
+        self.sock.close()
+        self.closed = True
 
 
 class SocketHandler:
@@ -101,12 +120,14 @@ class SocketHandler:
             while True:
                 try:
                     if len(data) > self.max_recv:
-                        self.disconnect(conn, "Too much data recieved!")
+                        # Too much data recv()d
+                        self.disconnect(conn)
                         break
 
                     recvd_data = conn.sock.recv(1024)
                     if not recvd_data:
-                        self.disconnect(conn, "Disconnected")
+                        # Client disconnected gracefully
+                        self.disconnect(conn)
                         break
 
                     data += recvd_data
@@ -120,7 +141,10 @@ class SocketHandler:
                         packet = Packet.create_from_data(data[offset:], False)
                     except ValueError as e:
                         # TODO: log error message
-                        self.disconnect(conn, f"Invalid packet ({e})")
+                        self.disconnect(conn)
+                        break
+                    except LegacyPing:
+                        self.disconnect(conn)
                         break
 
                     packets[conn].append(packet)
@@ -128,18 +152,13 @@ class SocketHandler:
 
         return packets
 
-    def disconnect(
-        self, client: SocketConnection, reason: str = "Disconnected by server"
-    ) -> None:
+    def disconnect(self, client: SocketConnection) -> None:
         """Disconnects a client from the server.
-
-        This should only be called for server-side disconnects - client-side disconnects are
-        to be processed manually.
 
         Args:
             client: The client to disconnect
         """
 
-        client.sock.close()
+        client.close()
         self.connections.remove(client)
         # TODO: Notify server
