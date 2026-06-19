@@ -8,5 +8,10 @@
                 "intent": {"type": "varint", "enum": [1, 2, 3]}
             }
         }
+    },
+    "status": {
+        "serverbound": {
+            "minecraft:status_request": {}
+        }
     }
 }

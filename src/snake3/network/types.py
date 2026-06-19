@@ -4,6 +4,9 @@ from typing import Tuple
 class VarNum:
     """Utility class that handles encoding/decoding VarInt/VarLong values"""
 
+    def __init__(self) -> None:
+        raise TypeError("Can't instantiate this class")
+
     @staticmethod
     def decode(data: bytes, is_varlong: bool) -> Tuple[int, int]:
         """Decodes a VarInt/VarLong from bytes into an int.

@@ -2,8 +2,7 @@ from enum import Enum
 import json
 import re
 import struct
-from tkinter.constants import N
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 import uuid
 from importlib import resources
 
@@ -91,7 +90,7 @@ class PacketFieldType(Enum):
     Subtypes:
         "plain": Plain text string with normal content
         "json": Stringified JSON. Strings with this subtype MUST decode to a JSON object, otherwise, an
-        error will be raised on decoding. Max length is ALWAYS 32767.
+        error will be raised on decoding. Max length is ALWAYS 262144.
         "identifier": Identifier string (i.e. "minecraft:yippity_yip"). Checked against regex patterns to ensure
         proper content. Max length is ALWAYS 32767.
     """
@@ -144,6 +143,12 @@ class PacketField:
 
     (the "yippity_yip" part of "minecraft:yippity_yip")
     """
+
+    MAX_JSON_STRING_SIZE: int = (262144 * 3) + 3
+    """The maximum length of a JSON string."""
+
+    MAX_IDENT_STRING_SIZE: int = (32767 * 3) + 3
+    """The maximum length of an identifier string."""
 
     def __init__(self) -> None:
         """Creates a new blank PacketField."""
@@ -206,6 +211,9 @@ class PacketField:
         Raises:
             ValueError - Something went wrong while decoding packet field
         """
+
+        # TODO: Replace struct.unpack() calls with struct.Struct().unpack() calls
+        # for better performance
 
         match self.type:
             case PacketFieldType.NULL:
@@ -270,7 +278,7 @@ class PacketField:
                 return 4
             case PacketFieldType.LONG:
                 try:
-                    self.value = struct.unpack("!i", from_data[0:8])[0]
+                    self.value = struct.unpack("!q", from_data[0:8])[0]
                 except struct.error as e:
                     raise ValueError(f"Error unpacking LONG: {e}")
 
@@ -301,21 +309,23 @@ class PacketField:
                 # Ensure length limit
                 match self.subtype:
                     case "plain":
-                        if self.max_length is not None:
+                        if self.max_length:
                             if string_length > (self.max_length * 3) + 3:
                                 raise ValueError(
-                                    f"String is too long ({string_length} but limit is {self.max_length})"
+                                    f"String is too long ({string_length} but limit is {self.max_length * 3 + 3})"
                                 )
                         else:
                             raise ValueError("No max_length specified")
                     case "json":
-                        if string_length > 32767:
+                        if string_length > 262144:
                             raise ValueError("String is too long (limit is 32767)")
                     case "identifier":
                         if string_length > 32767:
                             raise ValueError("String is too long (limit is 32767)")
                     case _:
-                        raise ValueError(f"Invalid string subtype {self.subtype}")
+                        raise ValueError(
+                            f"Invalid subtype {self.subtype} for STRING field"
+                        )
 
                 # Decode contents
                 try:
@@ -378,10 +388,9 @@ class PacketField:
             case PacketFieldType.UUID:
                 self.value = uuid.UUID(bytes=from_data[0:16])
                 return 16
-            case PacketFieldType.STRUCT:
-                raise ValueError("PacketFieldStruct() isn't implemented yet")
+            # TODO: Implement PacketFieldType.STRUCT
             case _:
-                return 0
+                raise ValueError(f"No decoder implemented for field type {self.type}")
 
     def _enum_check(self) -> None:
         if self.value in self.enum:
@@ -390,6 +399,110 @@ class PacketField:
             raise ValueError(
                 f"Invalid enum value {self.value}: valid values are {self.enum}"
             )
+
+    def encode(self) -> bytes:
+        """Encodes the field to bytes which can be sent in a packet.
+
+        Returns:
+            The encoded field data, as bytes
+
+        Raises:
+            ValueError - Failed to encode field value
+        """
+
+        # TODO: Replace struct.unpack() calls with struct.Struct().unpack() calls
+        # for better performance
+
+        match self.type:
+            case PacketFieldType.NULL:
+                raise ValueError("Attempted to encode a NULL-type field")
+            case PacketFieldType.BOOL:
+                if self.value:
+                    return b"\x01"
+                else:
+                    return b"\x00"
+            case PacketFieldType.BYTE:
+                try:
+                    return struct.pack("!b", self.value)
+                except struct.error as e:
+                    raise ValueError(f"Error packing BYTE: {e}")
+            case PacketFieldType.UBYTE:
+                try:
+                    return struct.pack("!B", self.value)
+                except struct.error as e:
+                    raise ValueError(f"Error packing UBYTE: {e}")
+            case PacketFieldType.SHORT:
+                try:
+                    return struct.pack("!h", self.value)
+                except struct.error as e:
+                    raise ValueError(f"Error packing SHORT: {e}")
+            case PacketFieldType.USHORT:
+                try:
+                    return struct.pack("!H", self.value)
+                except struct.error as e:
+                    raise ValueError(f"Error packing USHORT: {e}")
+            case PacketFieldType.INT:
+                try:
+                    return struct.pack("!i", self.value)
+                except struct.error as e:
+                    raise ValueError(f"Error packing INT: {e}")
+            case PacketFieldType.LONG:
+                try:
+                    return struct.pack("!q", self.value)
+                except struct.error as e:
+                    raise ValueError(f"Error packing LONG: {e}")
+            case PacketFieldType.FLOAT:
+                try:
+                    return struct.pack("!f", self.value)
+                except struct.error as e:
+                    raise ValueError(f"Error packing FLOAT: {e}")
+            case PacketFieldType.DOUBLE:
+                try:
+                    return struct.pack("!d", self.value)
+                except struct.error as e:
+                    raise ValueError(f"Error packing DOUBLE: {e}")
+            case PacketFieldType.STRING:
+                try:
+                    encoded_string = self.value.encode("utf-8")
+                except UnicodeEncodeError as e:
+                    raise ValueError(f"Error encoding string to UTF-8: {e}")
+
+                # Validate string length
+                match self.subtype:
+                    case "plain":
+                        if self.max_length:
+                            if len(encoded_string) > (self.max_length * 3) + 3:
+                                raise ValueError(
+                                    f"String is too long ({len(encoded_string)} but limit is {self.max_length * 3 + 3})"
+                                )
+                    case "json":
+                        # The actual JSON contents aren't validated when encoding for efficiency
+                        if len(encoded_string) > PacketField.MAX_JSON_STRING_SIZE:
+                            raise ValueError(
+                                f"String is too long ({len(encoded_string)} but limit is {PacketField.MAX_JSON_STRING_SIZE})"
+                            )
+                    case "identifier":
+                        # The actual identifier namespace:value contents aren't validated when
+                        # encoding for efficiency
+                        if len(encoded_string) > PacketField.MAX_IDENT_STRING_SIZE:
+                            raise ValueError(
+                                f"String is too long ({len(encoded_string)} but limit is {PacketField.MAX_IDENT_STRING_SIZE})"
+                            )
+                    case _:
+                        raise ValueError(
+                            f"Invalid subtype {self.subtype} for STRING field"
+                        )
+
+                return encoded_string
+            case PacketFieldType.VARINT:
+                return VarNum.encode(self.value, False)
+            case PacketFieldType.VARLONG:
+                return VarNum.encode(self.value, True)
+            case PacketFieldType.UUID:
+                return self.value.bytes
+            # TODO: Implement PacketFieldType.STRUCT
+            case _:
+                raise ValueError(f"No encoder implemented for field type {self.type}")
 
 
 class Packet:
