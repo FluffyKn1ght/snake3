@@ -83,7 +83,7 @@ class SocketHandler:
         self,
         bind_ip: str,
         bind_port: int,
-        *args,
+        *,
         max_recv_size: int,
     ) -> None:
         """Creates and sets up a new SocketHandler.

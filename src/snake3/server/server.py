@@ -43,7 +43,7 @@ class Snake3Server:
     MC_VERSION: str = "1.21.10"
     """The Minecraft Java version the server was made for. Purely cosmetic."""
 
-    def __init__(self, *args, config: ServerConfig) -> None:
+    def __init__(self, *, config: ServerConfig) -> None:
         self.config: ServerConfig = config
 
         self.socket_handler: SocketHandler
