@@ -1,11 +1,10 @@
 from typing import Tuple
 
+from snake3.misc import Uninstantiateable
 
-class VarNum:
+
+class VarNum(Uninstantiateable):
     """Utility class that handles encoding/decoding VarInt/VarLong values"""
-
-    def __init__(self) -> None:
-        raise TypeError("Can't instantiate this class")
 
     @staticmethod
     def decode(data: bytes, is_varlong: bool) -> Tuple[int, int]:
