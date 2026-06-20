@@ -20,9 +20,25 @@ from snake3.server.logging import (
 from snake3.server.socket import SocketConnection, SocketHandler
 
 
+class NoPacketHandlerError(Exception):
+    """Gets raised when an incoming packet doesn't have a handler associated with it."""
+
+    pass
+
+
+class _PacketHandlerEntry:
+    def __init__(self) -> None:
+        self.internal: Callable[[Packet, SocketConnection], None] | None = None
+        self.override: Callable[[Packet, SocketConnection], None] | None = None
+
+
 class Snake3Server:
     PROTOCOL_VERSION: int = 775
-    """The Minecraft Java protocol version the server speaks."""
+    """The Minecraft Java protocol version the server speaks.
+
+    Changing this will NOT change how the server works/which version it runs on and WILL
+    instead break a lot of stuff!!
+    """
 
     MC_VERSION: str = "1.21.10"
     """The Minecraft Java version the server was made for. Purely cosmetic."""
@@ -51,6 +67,10 @@ class Snake3Server:
         )
 
         self._running: bool = False
+
+        self._packet_handlers: Dict[
+            ProtocolState, Dict[str, Dict[str, _PacketHandlerEntry]]
+        ] = {}
 
     def start(self) -> None:  # TODO: Handle loglevel config field
         self._running = True
@@ -97,7 +117,7 @@ class Snake3Server:
                             break
 
                         try:
-                            self.handle_ingoing_packet(packet, client)
+                            self._handle_ingoing_packet(packet, client)
                         except Exception as e:
                             self.logger.error(
                                 f"Exception occured: {e.__class__.__name__}: {e}"
@@ -117,23 +137,27 @@ class Snake3Server:
         self._running = False
         self.logger.info("Stopped. See ya! :3")
 
-    def handle_ingoing_packet(self, packet: Packet, client: SocketConnection) -> None:
-        """Handles (processes) an ingoing network packet.
-
-        This is mostly a wrapper around the various packet handler
-        functions that ensures the packet will be handled correctly.
-
-        Args:
-            packet: The packet to process
-            client: The SocketConnection() to associate this packet with
-
-        Raises:
-            (various Exception()s) - Error while handling packet
-        """
-
-        self.logger.debug(f"{packet.raw} {client.addr}")
+    def _handle_ingoing_packet(self, packet: Packet, client: SocketConnection) -> None:
+        self.logger.debug(f"Got packet from {client.addr}: {packet.raw}")
+        self.logger.debug(f"{packet.name} ({packet.id} {client.state.value})")
         if packet.fields:
             for field_name in packet.fields:
                 self.logger.debug(
-                    f"{field_name} {packet.fields[field_name].type} {packet.fields[field_name].value}"
+                    f"  {field_name} {packet.fields[field_name].type} {packet.fields[field_name].value}"
                 )
+
+        try:
+            handler_entry: _PacketHandlerEntry = self._packet_handlers[client.state][
+                "serverbound"
+            ][packet.name]
+
+            if handler_entry.override:
+                handler_entry.override(packet, client)
+            elif handler_entry.internal:
+                handler_entry.internal(packet, client)
+            else:
+                raise NoPacketHandlerError(
+                    f"No handler for packet {packet.name} state {client.state}"
+                )
+        except KeyError:
+            raise ValueError("No handler for packet")

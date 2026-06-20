@@ -7,6 +7,12 @@ from snake3.network.packet import LegacyPing, Packet, ProtocolState
 from snake3.network.types import VarNum
 
 
+class NetworkError(Exception):
+    """Gets raised whenever a network error occurs."""
+
+    pass
+
+
 class SocketConnection:
     """Represents an active socket connection to a client.
 
@@ -39,6 +45,28 @@ class SocketConnection:
 
         self.sock.close()
         self.closed = True
+
+    def send(self, data: bytes) -> None:
+        """Sends the provided data blob through the SocketConnection().
+
+        If a network error occurs, NetworkError will be raised and the connection will be closed.
+
+        Args:
+            data: The data to send to the client
+
+        Raises:
+            ValueError: SocketConnection() was closed via close()
+            NetworkError: sendall() call failed
+        """
+
+        if self.closed:
+            raise ValueError("Connection closed")
+
+        try:
+            self.sock.sendall(data)
+        except Exception as e:
+            self.close()
+            raise NetworkError(e)
 
 
 class SocketHandler:

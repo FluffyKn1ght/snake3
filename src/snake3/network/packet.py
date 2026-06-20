@@ -9,6 +9,12 @@ from importlib import resources
 from snake3.network.types import VarNum
 
 
+class LegacyPing(Exception):
+    """Gets raised whenever a legacy ping packet is attempted to be decoded. (0xFE 0x01 ...)"""
+
+    pass
+
+
 class ProtocolState(Enum):
     """Represents different states of the Minecraft Java protocol"""
 
@@ -503,12 +509,6 @@ class PacketField:
             # TODO: Implement PacketFieldType.STRUCT
             case _:
                 raise ValueError(f"No encoder implemented for field type {self.type}")
-
-
-class LegacyPing(Exception):
-    """Gets raised whenever a legacy ping packet is attempted to be decoded. (0xFE 0x01 ...)"""
-
-    pass
 
 
 class Packet:
